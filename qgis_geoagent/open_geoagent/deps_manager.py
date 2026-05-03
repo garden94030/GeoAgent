@@ -323,8 +323,35 @@ def _get_clean_env() -> dict:
         "QGIS_PLUGINPATH",
     ]:
         env.pop(var, None)
+    qgis_pythonhome = _macos_qgis_pythonhome()
+    if qgis_pythonhome:
+        env["PYTHONHOME"] = qgis_pythonhome
     env["PYTHONIOENCODING"] = "utf-8"
     return env
+
+
+def _macos_qgis_contents_dir() -> Optional[str]:
+    """Return the QGIS.app Contents directory when running inside macOS QGIS."""
+    if platform.system() != "Darwin":
+        return None
+
+    executable = os.path.abspath(sys.executable)
+    parts = executable.split(os.sep)
+    for index, part in enumerate(parts):
+        if part.endswith(".app") and part == "QGIS.app":
+            contents = os.sep.join(parts[: index + 2])
+            if os.path.basename(contents) == "Contents" and os.path.isdir(contents):
+                return contents
+    return None
+
+
+def _macos_qgis_pythonhome() -> Optional[str]:
+    """Return the PYTHONHOME needed by QGIS's relocatable macOS Python."""
+    contents = _macos_qgis_contents_dir()
+    if not contents:
+        return None
+    frameworks = os.path.join(contents, "Frameworks")
+    return frameworks if os.path.isdir(frameworks) else None
 
 
 def _get_subprocess_kwargs() -> dict:
@@ -365,6 +392,23 @@ def _find_python_executable() -> str:
     Returns:
         Path to a Python executable, or ``sys.executable`` as fallback.
     """
+    if platform.system() == "Darwin":
+        contents = _macos_qgis_contents_dir()
+        if contents:
+            macos_dir = os.path.join(contents, "MacOS")
+            current = f"python{sys.version_info.major}.{sys.version_info.minor}"
+            candidates = [
+                os.path.join(macos_dir, current),
+                os.path.join(macos_dir, "python3"),
+            ]
+            if os.path.isdir(macos_dir):
+                for entry in sorted(os.listdir(macos_dir), reverse=True):
+                    if entry.startswith("python3"):
+                        candidates.append(os.path.join(macos_dir, entry))
+            for candidate in candidates:
+                if os.path.isfile(candidate):
+                    return candidate
+
     if platform.system() != "Windows":
         return sys.executable
 

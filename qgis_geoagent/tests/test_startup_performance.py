@@ -75,3 +75,40 @@ def test_python_runtime_error_mentions_required_version(monkeypatch) -> None:
 
     assert deps_manager.python_runtime_supported() is False
     assert "Python 99.0 or newer" in deps_manager.python_runtime_error()
+
+
+def test_find_python_executable_detects_macos_qgis_python(monkeypatch, tmp_path) -> None:
+    """macOS QGIS should use the bundled Python binary, not the app binary."""
+    from open_geoagent import deps_manager
+
+    app_root = tmp_path / "QGIS.app" / "Contents"
+    qgis_binary = app_root / "MacOS" / "QGIS"
+    python_binary = app_root / "MacOS" / "python3.12"
+    qgis_binary.parent.mkdir(parents=True)
+    qgis_binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    python_binary.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(deps_manager.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(deps_manager.sys, "executable", str(qgis_binary))
+
+    assert deps_manager._find_python_executable() == str(python_binary)
+
+
+def test_clean_env_preserves_macos_qgis_pythonhome(monkeypatch, tmp_path) -> None:
+    """QGIS's macOS Python needs PYTHONHOME pointing at Contents/Frameworks."""
+    from open_geoagent import deps_manager
+
+    app_root = tmp_path / "QGIS.app" / "Contents"
+    qgis_binary = app_root / "MacOS" / "QGIS"
+    frameworks_dir = app_root / "Frameworks"
+    qgis_binary.parent.mkdir(parents=True)
+    frameworks_dir.mkdir(parents=True)
+    qgis_binary.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setattr(deps_manager.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(deps_manager.sys, "executable", str(qgis_binary))
+    monkeypatch.setenv("PYTHONHOME", "/unrelated")
+
+    env = deps_manager._get_clean_env()
+
+    assert env["PYTHONHOME"] == str(frameworks_dir)

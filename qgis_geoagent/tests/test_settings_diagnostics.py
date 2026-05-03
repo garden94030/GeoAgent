@@ -97,7 +97,10 @@ def test_provider_test_worker_uses_ollama_safe_smoke_prompt(monkeypatch) -> None
     """Ollama smoke tests should avoid GeoAgent's full prompt/token budget."""
     import sys
 
+    from open_geoagent import deps_manager
+
     captured = {}
+    calls: list[str] = []
 
     class _FakeConfig:
         def __init__(self, **kwargs):
@@ -125,6 +128,11 @@ def test_provider_test_worker_uses_ollama_safe_smoke_prompt(monkeypatch) -> None
     monkeypatch.setitem(sys.modules, "geoagent.core", types.ModuleType("geoagent.core"))
     monkeypatch.setitem(sys.modules, "geoagent.core.model", model_module)
     monkeypatch.setitem(sys.modules, "strands", strands_module)
+    monkeypatch.setattr(
+        deps_manager,
+        "ensure_venv_packages_available",
+        lambda: calls.append("ensure") or True,
+    )
 
     worker = ProviderTestWorker("ollama", "qwen3.5:4b", 256, _FakeSettings({}))
     emitted = {}
@@ -132,6 +140,7 @@ def test_provider_test_worker_uses_ollama_safe_smoke_prompt(monkeypatch) -> None
 
     worker.run()
 
+    assert calls == ["ensure"]
     assert emitted["result"]["success"] is True
     assert captured["config"]["max_tokens"] == 4096
     assert captured["agent_kwargs"]["tools"] == []

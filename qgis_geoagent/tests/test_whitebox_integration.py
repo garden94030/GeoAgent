@@ -37,6 +37,71 @@ def _install_fake_geoagent(monkeypatch, captured):
     return module
 
 
+def test_chat_worker_ensures_venv_before_importing_geoagent(monkeypatch) -> None:
+    """ChatWorker should apply dependency path fixes before GeoAgent imports."""
+    from open_geoagent import deps_manager
+    from open_geoagent.dialogs.chat_dock import ChatWorker
+
+    captured: dict[str, Any] = {}
+    calls: list[str] = []
+
+    class _GeoAgentConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class _TrackingGeoAgent(types.ModuleType):
+        def __getattribute__(self, name):
+            if name == "GeoAgentConfig":
+                captured["config_read_after_ensure"] = "ensure" in calls
+            return super().__getattribute__(name)
+
+    class _StubResponse:
+        success = True
+        answer_text = "ok"
+        error_message = ""
+        executed_tools: list = []
+        tool_calls: list = []
+        cancelled_tools: list = []
+        execution_time = 0.0
+
+    class _StubAgent:
+        def chat(self, prompt: str) -> _StubResponse:
+            return _StubResponse()
+
+    def _factory(iface, **kwargs):
+        return _StubAgent()
+
+    geoagent_module = _TrackingGeoAgent("geoagent")
+    geoagent_module.GeoAgentConfig = _GeoAgentConfig
+    geoagent_module.for_qgis = _factory
+    monkeypatch.setitem(sys.modules, "geoagent", geoagent_module)
+    monkeypatch.setattr(
+        deps_manager,
+        "ensure_venv_packages_available",
+        lambda: calls.append("ensure") or True,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "qgis.core",
+        types.SimpleNamespace(QgsProject=types.SimpleNamespace(instance=lambda: None)),
+    )
+
+    worker = ChatWorker(
+        iface=object(),
+        prompt="hello",
+        provider="anthropic",
+        model_id="claude-x",
+        fast=False,
+        max_tokens=1024,
+    )
+    worker.finished.connect(lambda _payload: None)
+
+    worker.run()
+
+    assert calls == ["ensure"]
+    assert captured["config_read_after_ensure"] is True
+
+
 def test_dependencies_include_whitebox() -> None:
     """Verify the plugin dependency installer checks Whitebox."""
     from open_geoagent.deps_manager import DEPENDENCY_GROUPS

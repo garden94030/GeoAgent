@@ -1815,6 +1815,9 @@ class ChatWorker(QThread):
     def run(self):
         """Create a GeoAgent QGIS agent and execute one chat turn."""
         try:
+            from ..deps_manager import ensure_venv_packages_available
+
+            ensure_venv_packages_available()
             from geoagent import GeoAgentConfig
             import geoagent
 

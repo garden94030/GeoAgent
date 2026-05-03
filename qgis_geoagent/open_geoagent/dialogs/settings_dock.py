@@ -232,6 +232,9 @@ class ProviderTestWorker(QThread):
                 from ..oauth import ensure_openai_oauth_environment
 
                 ensure_openai_oauth_environment(self.settings, codex=True)
+            from ..deps_manager import ensure_venv_packages_available
+
+            ensure_venv_packages_available()
             from geoagent import GeoAgentConfig
             from geoagent.core.model import resolve_model
             from strands import Agent

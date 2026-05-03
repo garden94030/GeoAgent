@@ -91,6 +91,8 @@ REQUIRED_PACKAGES = DEPENDENCY_GROUPS["Core Providers"]
 
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".open_geoagent")
 PYTHON_VERSION = f"py{sys.version_info.major}.{sys.version_info.minor}"
+VENV_PREFERRED_MODULES = ("pydantic", "pydantic_core", "typing_extensions")
+MACOS_QGIS_SIGNED_MODULES = ("pydantic", "pydantic_core")
 
 
 def get_venv_dir() -> str:
@@ -157,6 +159,81 @@ def venv_exists() -> bool:
     return os.path.isdir(venv_dir) and os.path.isfile(python_path)
 
 
+def _normalized_path(path: str) -> str:
+    """Return a normalized path for stable sys.path comparisons."""
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _path_is_under(path: str, parent: str) -> bool:
+    """Return True when path is inside parent."""
+    try:
+        return os.path.commonpath(
+            [_normalized_path(path), _normalized_path(parent)]
+        ) == _normalized_path(parent)
+    except (OSError, ValueError):
+        return False
+
+
+def _promote_sys_path(path: str) -> None:
+    """Move a sys.path entry to the front while preserving .pth processing."""
+    target = _normalized_path(path)
+    matches = [entry for entry in sys.path if _normalized_path(entry) == target]
+    sys.path[:] = [
+        entry for entry in sys.path if _normalized_path(entry) != target
+    ]
+    sys.path.insert(0, matches[0] if matches else path)
+
+
+def _module_available_in_site_packages(site_packages: str, module_name: str) -> bool:
+    """Return True when a top-level module is present in site-packages."""
+    top_level_name = module_name.split(".", 1)[0]
+    return os.path.exists(os.path.join(site_packages, f"{top_level_name}.py")) or (
+        os.path.exists(os.path.join(site_packages, top_level_name, "__init__.py"))
+    )
+
+
+def _remove_shadowing_modules(site_packages: str) -> None:
+    """Drop already imported QGIS-bundled modules that should come from venv."""
+    for loaded_name, module in list(sys.modules.items()):
+        top_level_name = loaded_name.split(".", 1)[0]
+        if top_level_name not in VENV_PREFERRED_MODULES:
+            continue
+        origin = getattr(module, "__file__", None)
+        if not origin or _path_is_under(origin, site_packages):
+            continue
+        if _module_available_in_site_packages(site_packages, top_level_name):
+            sys.modules.pop(loaded_name, None)
+
+
+def _remove_venv_modules(site_packages: str, module_names: Tuple[str, ...]) -> None:
+    """Drop already imported venv modules so signed QGIS copies can be used."""
+    for loaded_name, module in list(sys.modules.items()):
+        top_level_name = loaded_name.split(".", 1)[0]
+        if top_level_name not in module_names:
+            continue
+        origin = getattr(module, "__file__", None)
+        if origin and _path_is_under(origin, site_packages):
+            sys.modules.pop(loaded_name, None)
+
+
+def _load_venv_typing_extensions(site_packages: str) -> None:
+    """Load venv's pure-Python typing_extensions ahead of QGIS's stale copy."""
+    module_path = os.path.join(site_packages, "typing_extensions.py")
+    if not os.path.isfile(module_path):
+        return
+
+    current = sys.modules.get("typing_extensions")
+    if current is not None and hasattr(current, "Sentinel"):
+        return
+
+    spec = importlib.util.spec_from_file_location("typing_extensions", module_path)
+    if spec is None or spec.loader is None:
+        return
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["typing_extensions"] = module
+    spec.loader.exec_module(module)
+
+
 def ensure_venv_packages_available() -> bool:
     """Add the venv's site-packages to sys.path if the venv exists.
 
@@ -175,6 +252,16 @@ def ensure_venv_packages_available() -> bool:
         # Use addsitedir instead of sys.path.insert so .pth files created by
         # editable installs are processed when QGIS adds the venv at runtime.
         site.addsitedir(site_packages)
+        if _macos_qgis_contents_dir():
+            # macOS QGIS enforces library validation for native extensions.
+            # Keep signed QGIS wheels for pydantic_core, but use venv's newer
+            # pure-Python typing_extensions so those signed wheels can import.
+            _remove_venv_modules(site_packages, MACOS_QGIS_SIGNED_MODULES)
+            _load_venv_typing_extensions(site_packages)
+        else:
+            # Other runtimes can safely prefer the isolated plugin venv.
+            _promote_sys_path(site_packages)
+            _remove_shadowing_modules(site_packages)
     elif site_packages not in sys.path:
         sys.path.insert(0, site_packages)
     return True

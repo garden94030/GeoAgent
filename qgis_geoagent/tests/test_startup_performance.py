@@ -73,6 +73,118 @@ def test_ensure_venv_packages_available_processes_pth_files(
     assert str(source_dir) in sys.path
 
 
+def test_ensure_venv_packages_available_prioritizes_venv_site_packages(
+    monkeypatch, tmp_path
+) -> None:
+    """GeoAgent dependencies should beat QGIS-bundled third-party packages."""
+    from open_geoagent import deps_manager
+
+    qgis_site_packages = tmp_path / "qgis-site-packages"
+    site_packages = tmp_path / "venv-site-packages"
+    qgis_site_packages.mkdir()
+    site_packages.mkdir()
+
+    monkeypatch.setattr(deps_manager, "venv_exists", lambda: True)
+    monkeypatch.setattr(
+        deps_manager, "get_venv_site_packages", lambda: str(site_packages)
+    )
+    original_sys_path = list(sys.path)
+    try:
+        sys.path[:] = [str(qgis_site_packages), *original_sys_path]
+
+        assert deps_manager.ensure_venv_packages_available() is True
+
+        assert sys.path.index(str(site_packages)) < sys.path.index(
+            str(qgis_site_packages)
+        )
+    finally:
+        sys.path[:] = original_sys_path
+
+
+def test_ensure_venv_packages_available_removes_qgis_shadowed_modules(
+    monkeypatch, tmp_path
+) -> None:
+    """Already loaded QGIS package copies should not poison GeoAgent imports."""
+    from open_geoagent import deps_manager
+
+    qgis_site_packages = tmp_path / "qgis-site-packages"
+    site_packages = tmp_path / "venv-site-packages"
+    qgis_site_packages.mkdir()
+    site_packages.mkdir()
+    (qgis_site_packages / "typing_extensions.py").write_text(
+        "_Sentinel = object()\n", encoding="utf-8"
+    )
+    (site_packages / "typing_extensions.py").write_text(
+        "Sentinel = object()\n", encoding="utf-8"
+    )
+
+    old_typing_extensions = types.ModuleType("typing_extensions")
+    old_typing_extensions.__file__ = str(qgis_site_packages / "typing_extensions.py")
+    monkeypatch.setitem(sys.modules, "typing_extensions", old_typing_extensions)
+    monkeypatch.setattr(deps_manager, "venv_exists", lambda: True)
+    monkeypatch.setattr(
+        deps_manager, "get_venv_site_packages", lambda: str(site_packages)
+    )
+
+    assert deps_manager.ensure_venv_packages_available() is True
+
+    assert "typing_extensions" not in sys.modules
+
+
+def test_ensure_venv_packages_available_keeps_macos_qgis_signed_wheels(
+    monkeypatch, tmp_path
+) -> None:
+    """macOS QGIS should only override typing_extensions, not native wheels."""
+    from open_geoagent import deps_manager
+
+    app_root = tmp_path / "QGIS.app" / "Contents"
+    qgis_binary = app_root / "MacOS" / "QGIS"
+    qgis_binary.parent.mkdir(parents=True)
+    qgis_binary.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    qgis_site_packages = tmp_path / "qgis-site-packages"
+    site_packages = tmp_path / "venv-site-packages"
+    qgis_site_packages.mkdir()
+    site_packages.mkdir()
+    (site_packages / "typing_extensions.py").write_text(
+        "Sentinel = object()\n", encoding="utf-8"
+    )
+    (site_packages / "pydantic_core").mkdir()
+    (site_packages / "pydantic_core" / "__init__.py").write_text(
+        "__version__ = 'venv'\n", encoding="utf-8"
+    )
+
+    old_pydantic_core = types.ModuleType("pydantic_core")
+    old_pydantic_core.__file__ = str(site_packages / "pydantic_core" / "__init__.py")
+    old_typing_extensions = types.ModuleType("typing_extensions")
+    old_typing_extensions.__file__ = str(
+        qgis_site_packages / "typing_extensions.py"
+    )
+    monkeypatch.setitem(sys.modules, "pydantic_core", old_pydantic_core)
+    monkeypatch.setitem(sys.modules, "typing_extensions", old_typing_extensions)
+    monkeypatch.setattr(deps_manager.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(deps_manager.sys, "executable", str(qgis_binary))
+    monkeypatch.setattr(deps_manager, "venv_exists", lambda: True)
+    monkeypatch.setattr(
+        deps_manager, "get_venv_site_packages", lambda: str(site_packages)
+    )
+    original_sys_path = list(sys.path)
+    try:
+        sys.path[:] = [str(qgis_site_packages), *original_sys_path]
+
+        assert deps_manager.ensure_venv_packages_available() is True
+
+        assert sys.path.index(str(qgis_site_packages)) < sys.path.index(
+            str(site_packages)
+        )
+        assert sys.modules["typing_extensions"].__file__ == str(
+            site_packages / "typing_extensions.py"
+        )
+        assert "pydantic_core" not in sys.modules
+    finally:
+        sys.path[:] = original_sys_path
+
+
 def test_required_dependencies_include_core_runtime_packages() -> None:
     """Dependency gate should catch partial GeoAgent installs."""
     from open_geoagent.deps_manager import REQUIRED_PACKAGES

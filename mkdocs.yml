@@ -80,6 +80,7 @@ nav:
     - Kinmen Satellite Analysis: kinmen-satellite-analysis.md
     - Kinmen QGIS Beginner Steps: kinmen-qgis-beginner-steps.md
     - Kinmen ROI And Zonal Statistics: kinmen-qgis-roi-zonal-statistics.md
+    - Kinmen Google Earth Simplified Workflow: kinmen-google-earth-simplified.md
     - Changelog: https://github.com/opengeos/GeoAgent/releases
     - Report Issues: https://github.com/opengeos/GeoAgent/issues
     - Contributing: contributing.md

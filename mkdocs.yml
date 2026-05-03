@@ -78,6 +78,7 @@ nav:
     - Usage: usage.md
     - QGIS Plugin: qgis-plugin.md
     - Kinmen Satellite Analysis: kinmen-satellite-analysis.md
+    - Kinmen QGIS Beginner Steps: kinmen-qgis-beginner-steps.md
     - Changelog: https://github.com/opengeos/GeoAgent/releases
     - Report Issues: https://github.com/opengeos/GeoAgent/issues
     - Contributing: contributing.md

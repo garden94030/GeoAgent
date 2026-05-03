@@ -45,6 +45,34 @@ def test_all_dependencies_met_uses_lightweight_spec_checks(monkeypatch) -> None:
     assert checked == ["geoagent", "strands"]
 
 
+def test_ensure_venv_packages_available_processes_pth_files(
+    monkeypatch, tmp_path
+) -> None:
+    """Editable installs should work when QGIS adds the plugin venv later."""
+    from open_geoagent import deps_manager
+
+    source_dir = tmp_path / "editable_source"
+    site_packages = tmp_path / "site-packages"
+    source_dir.mkdir()
+    site_packages.mkdir()
+    (site_packages / "editable-test.pth").write_text(
+        f"{source_dir}\n", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(deps_manager, "venv_exists", lambda: True)
+    monkeypatch.setattr(
+        deps_manager, "get_venv_site_packages", lambda: str(site_packages)
+    )
+    if str(source_dir) in sys.path:
+        sys.path.remove(str(source_dir))
+    if str(site_packages) in sys.path:
+        sys.path.remove(str(site_packages))
+
+    assert deps_manager.ensure_venv_packages_available() is True
+
+    assert str(source_dir) in sys.path
+
+
 def test_required_dependencies_include_core_runtime_packages() -> None:
     """Dependency gate should catch partial GeoAgent installs."""
     from open_geoagent.deps_manager import REQUIRED_PACKAGES

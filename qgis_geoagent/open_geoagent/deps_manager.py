@@ -20,6 +20,7 @@ import importlib.util
 import os
 import platform
 import shutil
+import site
 import subprocess  # nosec B404
 import sys
 import time
@@ -170,7 +171,11 @@ def ensure_venv_packages_available() -> bool:
         return False
 
     site_packages = get_venv_site_packages()
-    if site_packages not in sys.path:
+    if os.path.isdir(site_packages):
+        # Use addsitedir instead of sys.path.insert so .pth files created by
+        # editable installs are processed when QGIS adds the venv at runtime.
+        site.addsitedir(site_packages)
+    elif site_packages not in sys.path:
         sys.path.insert(0, site_packages)
     return True
 
